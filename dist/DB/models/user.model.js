@@ -57,7 +57,7 @@ const userSchema = new mongoose_1.Schema({
     password: {
         type: String,
         required: function () {
-            return this.provider === ProviderEnum.System;
+            return this.provider === ProviderEnum.Google ? false : true;
         },
     },
     phone: {
@@ -66,19 +66,21 @@ const userSchema = new mongoose_1.Schema({
             return this.provider === ProviderEnum.System;
         },
     },
+    resetPasswordOtp: { type: String },
+    changeCredentialsTime: { type: Date },
     gender: {
         type: String,
-        enum: Object.values(GenderEnum),
+        enum: GenderEnum,
         default: GenderEnum.Male,
     },
     role: {
         type: String,
-        enum: Object.values(RoleEnum),
+        enum: RoleEnum,
         default: RoleEnum.User,
     },
     provider: {
         type: String,
-        enum: Object.values(ProviderEnum),
+        enum: ProviderEnum,
         default: ProviderEnum.System,
     },
     confirmEmail: Date,
@@ -86,6 +88,8 @@ const userSchema = new mongoose_1.Schema({
     confirmEmailOtpCreatedAt: Date,
     otpFailedAttempts: { type: Number, default: 0 },
     otpBannedUntil: Date,
+    profileImage: { type: String },
+    coverImages: [String],
 }, {
     timestamps: true,
     toObject: { virtuals: true },
@@ -101,4 +105,3 @@ userSchema
     this.set({ firstName, lastName });
 });
 exports.UserModel = mongoose_1.default.models.User || mongoose_1.default.model("User", userSchema);
-exports.UserModel.syncIndexes();

@@ -1,8 +1,8 @@
 //Setup ENV
 import { resolve } from 'node:path';
 import { config } from 'dotenv';
-// config({ path: resolve("./config/.env.development") });
-config({})
+config({ path: resolve("./config/.env.development") });
+// config({})
 
 //Load express and express types
 import type { Response, Request, Express, NextFunction } from 'express';
@@ -15,6 +15,7 @@ import { rateLimit } from 'express-rate-limit'
 
 //import module routing
 import authController from './modules/auth/auth.controller'
+import userController from './modules/user/user.controller'
 import { globalErrorHandling } from './utils/response/error.response';
 import connectDB from './DB/connection.db';
 
@@ -29,7 +30,7 @@ const limiter = rateLimit({
 
 
 //app-start-point
-const bootstrap = (): void => {
+const bootstrap = async (): Promise<void> => {
 
     const port = process.env.PORT || 3000;
     const app: Express = express()
@@ -38,7 +39,7 @@ const bootstrap = (): void => {
     app.use(cors(), express.json(), helmet(), limiter);
 
     //DB
-    connectDB()
+    await connectDB()
 
     //app-routing
     app.get("/", (req: Request, res: Response) => {
@@ -47,6 +48,7 @@ const bootstrap = (): void => {
 
     //sub-app-routing-modules
     app.use("/auth", authController)
+    app.use("/user", userController)
 
     //In-valid routing
     app.use("{/*dummy}", (req: Request, res: Response) => {

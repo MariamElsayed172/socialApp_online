@@ -2,7 +2,7 @@ export const verifyEmailTemplate = ({
     otp,
     title = "Email Confirmation",
 }: {
-    otp: string;
+    otp: number;
     title?: string;
 }): string => {
     return `<!DOCTYPE html>

@@ -1,14 +1,35 @@
 import type { Request, Response } from "express";
-import { customAlphabet } from "nanoid";
-import * as DBService from '../../DB/db.service';
-import { UserModel } from "../../DB/models/user.model";
-import { emailEvent } from "../../utils/events/email.event";
-import type { ISignupBodyInputsDTO } from "./auth.dto";
+import { ProviderEnum, UserModel } from "../../DB/models/user.model";
+import { emailEvent } from "../../utils/event/email.event";
+import type { IConfirmEmailBodyInputsDTO, IForgotCodeBodyInputsDTO, IGmail, ILoginBodyInputsDTO, IResetCodeBodyInputsDTO, ISignupBodyInputsDTO, IVerifyCodeBodyInputsDTO } from "./auth.dto";
 
+import { BadRequestException, ConflictException, NotFoundException } from "../../utils/response/error.response";
+import { UserRepository } from "../../DB/repository/user.repository";
+import { compareHash, generateHash } from "../../utils/security/hash.security";
+import { generateNumberOtp } from "../../utils/otp";
+import { createLoginCredentials } from "../../utils/security/token.security";
+
+import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 
 
 class AuthenticationService {
+    private userModel = new UserRepository(UserModel);
     constructor() { }
+
+    private async verifyGmailAccount(idToken: string): Promise<TokenPayload> {
+        const client = new OAuth2Client();
+        const ticket = await client.verifyIdToken({
+            idToken,
+            audience: process.env.WEB_CLIENT_ID?.split(",") || [],
+        });
+        const payload = ticket.getPayload();
+        if (!payload?.email_verified) {
+            throw new BadRequestException("Fail to verify this google account")
+        }
+        return payload;
+
+    }
+
 
     /**
      * 
@@ -22,56 +43,98 @@ class AuthenticationService {
 
     signup = async (req: Request, res: Response): Promise<Response> => {
 
-
-
         let { fullName, email, password, phone }: ISignupBodyInputsDTO = req.body;
         // console.log({ fullName, email, password });
-        if (await DBService.findOne({ model: UserModel, filter: { email } })) {
-            throw new Error("Email exist", { cause: 409 })
+        if (await this.userModel.findOne({ filter: { email }, options: { lean: true } })) {
+            throw new ConflictException("Email exist")
         }
-        const [user] = await DBService.create({
-            model: UserModel,
-            data: [
-                {
-                    fullName,
-                    email,
-                    password,
-                    phone,
-                }
-            ]
-        })
+        const user = await this.userModel.createUser({
+            data: [{
+                fullName,
+                email,
+                password: await generateHash(password),
+                phone,
+            }]
+        });
+
+        if (!user) {
+            throw new BadRequestException("Fail to signup")
+        }
 
         await this.sendConfirmEmailOtp({ email })
         return res.status(201).json({ message: "Done", data: { user } })
     }
 
-    login = async (req: Request, res: Response): Promise<Response> => {
-        const { email, password } = req.body
-        const user = await DBService.findOne({ model: UserModel, filter: { email } })
+    signupWithGmail = async (req: Request, res: Response): Promise<Response> => {
+        const { idToken }: IGmail = req.body;
+        const { email, family_name, given_name, name, picture } = await this.verifyGmailAccount(idToken as string);
+        const user = await this.userModel.findOne({
+            filter: {
+                email,
+            },
+        });
+
+        if (user) {
+            if (user.provider === ProviderEnum.Google) {
+                return await this.loginWithGmail(req, res)
+            }
+            throw new ConflictException(`Email exist with another provider ::: ${user.provider}`)
+        }
+
+        const [newUser] = (await this.userModel.create({
+            data: [{ email: email as string, firstName: given_name as string, lastName: family_name as string, profileImage: picture as string, confirmEmail: new Date(), provider: ProviderEnum.Google }]
+        })) || []
+        if (!newUser) {
+            throw new BadRequestException("Fail to signup with gmail please try again later")
+        }
+        const credentials = await createLoginCredentials(newUser);
+
+
+        return res.status(201).json({ message: "Done", data: { credentials } })
+    }
+
+    loginWithGmail = async (req: Request, res: Response): Promise<Response> => {
+        const { idToken }: IGmail = req.body;
+        const { email } = await this.verifyGmailAccount(idToken as string);
+        const user = await this.userModel.findOne({
+            filter: {
+                email,
+                provider: ProviderEnum.Google
+            },
+        });
+
         if (!user) {
-            throw new Error("In-valid email or password", { cause: 404 })
+            throw new NotFoundException(`Not register account or registered with another provider`)
+        }
+
+        const credentials = await createLoginCredentials(user);
+
+        return res.status(200).json({ message: "Done", data: { credentials } })
+    }
+
+    login = async (req: Request, res: Response): Promise<Response> => {
+        const { email, password }: ILoginBodyInputsDTO = req.body
+        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System } })
+        if (!user) {
+            throw new NotFoundException("In-valid email or password")
         }
 
         if (!user.confirmEmail) {
-            throw new Error("Please verify you account first")
+            throw new BadRequestException("Please verify you account first")
         }
 
-        // if (user.deletedAt) {
-        //     throw new Error("Account is deleted")
-        // }
-
-        if (password !== user.password) {
-            throw new Error("In-valid email or password", { cause: 404 })
+        if (! await compareHash(password, user.password as string)) {
+            throw new NotFoundException("In-valid email or password")
         }
 
-        return res.status(200).json({ message: "Done", data: { user } })
+        const credentials = await createLoginCredentials(user);
+        return res.status(200).json({ message: "Done", data: { credentials } })
     }
 
 
     confirmEmail = async (req: Request, res: Response): Promise<Response> => {
-        const { email, otp } = req.body
-        const user = await DBService.findOne({
-            model: UserModel,
+        const { email, otp }: IConfirmEmailBodyInputsDTO = req.body
+        const user = await this.userModel.findOne({
             filter: {
                 email,
                 confirmEmail: { $exists: false },
@@ -81,7 +144,7 @@ class AuthenticationService {
         //console.log(user);
 
         if (!user) {
-            throw new Error("In-valid account or already verified", { cause: 404 })
+            throw new NotFoundException("In-valid account or already verified")
         }
 
         const now = new Date();
@@ -99,8 +162,8 @@ class AuthenticationService {
         }
 
 
-        if (otp !== user.confirmEmailOtp) {
-            const attempts = user.otpFailedAttempts + 1;
+        if (! await compareHash(otp, user.confirmEmailOtp as string)) {
+            const attempts = user.otpFailedAttempts as number + 1;
             const updateData = { otpFailedAttempts: attempts };
 
             if (attempts >= 5) {
@@ -108,40 +171,34 @@ class AuthenticationService {
                 updateData.otpFailedAttempts = 0;
             }
 
-            await DBService.updateOne({
-                model: UserModel,
+            await this.userModel.updateOne({
                 filter: { email },
                 data: updateData
             });
 
 
-            // if (updateUser.matchedCount) {
-            //     throw new Error("fail to confirm user email")
-            // }
-            throw new Error("Invalid OTP", { cause: 401 });
-            // return res.status(200).json({ message: "Done", data: { user } })
+
+            throw new ConflictException("Invalid OTP");
         }
-        const updateUser = await DBService.updateOne({
-            model: UserModel,
+        const updateUser = await this.userModel.updateOne({
             filter: { email },
             data: {
                 confirmEmail: Date.now(),
-                $unset: { confirmEmailOtp: true, otpFailedAttempts: 0 },
+                $unset: { confirmEmailOtp: true, otpFailedAttempts: true, confirmEmailOtpCreatedAt: true, otpBannedUntil: true },
                 $inc: { __v: 1 }
             }
         })
 
         if (!updateUser.matchedCount) {
-                throw new Error("fail to confirm user email")
-            }
-        return res.status(200).json({ message: "Done", data: { user } })
+            throw new Error("fail to confirm user email")
+        }
+        return res.status(200).json({ message: "Done", data: { updateUser } })
 
     }
 
 
     sendConfirmEmailOtp = async ({ email }: { email: string }) => {
-        const user = await DBService.findOne({
-            model: UserModel,
+        const user = await this.userModel.findOne({
             filter: {
                 email,
                 confirmEmail: { $exists: false },
@@ -169,13 +226,12 @@ class AuthenticationService {
             }
         }
 
-        const otp = customAlphabet("0123456789", 6)();
+        const otp = generateNumberOtp();
 
-        await DBService.updateOne({
-            model: UserModel,
+        await this.userModel.updateOne({
             filter: { email },
             data: {
-                confirmEmailOtp: otp,
+                confirmEmailOtp: await generateHash(String(otp)),
                 confirmEmailOtpCreatedAt: now,
                 otpFailedAttempts: 0,
                 otpBannedUntil: null,
@@ -183,6 +239,67 @@ class AuthenticationService {
         });
 
         emailEvent.emit("confirmEmail", { to: email, otp });
+    }
+
+    sendForgetCode = async (req: Request, res: Response): Promise<Response> => {
+        const { email }: IForgotCodeBodyInputsDTO = req.body
+        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, confirmEmail: { $exists: true } } })
+        if (!user) {
+            throw new NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account ]")
+        }
+        const otp = generateNumberOtp()
+        const result = await this.userModel.updateOne({
+            filter: { email },
+            data: {
+                resetPasswordOtp: await generateHash(String(otp))
+            }
+        })
+        if (!result.matchedCount) {
+            throw new BadRequestException("Fail to send the reset code please try again later")
+        }
+        emailEvent.emit("resetPassword", { to: email, otp })
+        return res.status(200).json({ message: "Done" })
+    }
+
+    
+    verifyForgetCode = async (req: Request, res: Response): Promise<Response> => {
+        const { email, otp }: IVerifyCodeBodyInputsDTO = req.body
+        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, resetPasswordOtp:{$exists:true} } })
+        if (!user) {
+            throw new NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account , missing resetPasswordOtp ]")
+        }
+
+        if (!await compareHash(otp, user.resetPasswordOtp as string)) {
+            throw new ConflictException("In-valid otp ]")
+        }
+        
+        return res.status(200).json({ message: "Done" })
+    }
+
+    resetForgetCode = async (req: Request, res: Response): Promise<Response> => {
+        const { email, otp, password }: IResetCodeBodyInputsDTO = req.body
+        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, resetPasswordOtp:{$exists:true} } })
+        if (!user) {
+            throw new NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account , missing resetPasswordOtp ]")
+        }
+
+        if (!await compareHash(otp, user.resetPasswordOtp as string)) {
+            throw new ConflictException("In-valid otp ]")
+        }
+        const result = await this.userModel.updateOne({
+            filter: { email },
+            data: {
+                password: await generateHash(password),
+                changeCredentialsTime: new Date(),
+                $unset:{resetPasswordOtp:1}
+            }
+        })
+        if (!result.matchedCount) {
+            throw new BadRequestException("Fail to reset password")
+        }
+
+        
+        return res.status(200).json({ message: "Done" })
     }
 }
 

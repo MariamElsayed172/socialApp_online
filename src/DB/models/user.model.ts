@@ -1,5 +1,5 @@
 
-import mongoose, { Schema, Document, Model } from "mongoose";
+import mongoose, { Schema, Document, Model, HydratedDocument } from "mongoose";
 
 export enum GenderEnum {
     Male = "male",
@@ -25,18 +25,21 @@ export interface IUser extends Document {
     gender: GenderEnum;
     role: RoleEnum;
     provider: ProviderEnum;
-    confirmEmail?: Date;
+    confirmEmail?: Date ;
     confirmEmailOtp?: string;
-    confirmEmailOtpCreatedAt?: Date;
-    // forgotPasswordOtp?: string;
-    // changeCredentialsTime?: Date;
-    otpFailedAttempts: number;
-    otpBannedUntil?: Date;
-    // deletedAt?: Date;
+    confirmEmailOtpCreatedAt?: Date ;
+    resetPasswordOtp?: string;
+    changeCredentialsTime?:  Date ;
+    otpFailedAttempts?: number;
+    otpBannedUntil?: Date ;
+    createdAt:  Date ;
+    deletedAt?:  Date ;
     // deletedBy?: mongoose.Types.ObjectId;
-    // restoreAt?: Date;
+    // restoreAt?: {type: Date};
     // restoreBy?: mongoose.Types.ObjectId;
     // picture?: { secure_url: string; public_id: string };
+    profileImage?:string;
+    coverImages?:string[];
     // coverImages?: { secure_url: string; public_id: string }[];
     fullName: string;
 }
@@ -49,8 +52,8 @@ const userSchema = new Schema<IUser>(
         email: { type: String, required: true, unique: true },
         password: {
             type: String,
-            required: function (this: IUser) {
-                return this.provider === ProviderEnum.System;
+            required: function () {
+                return this.provider === ProviderEnum.Google? false:true;
             },
         },
         phone: {
@@ -59,36 +62,38 @@ const userSchema = new Schema<IUser>(
                 return this.provider === ProviderEnum.System;
             },
         },
-        // forgotPasswordOtp: String,
-        // changeCredentialsTime: Date,
+        resetPasswordOtp: { type: String },
+        changeCredentialsTime: { type: Date },
         gender: {
             type: String,
-            enum: Object.values(GenderEnum),
+            enum: GenderEnum,
             default: GenderEnum.Male,
         },
         role: {
             type: String,
-            enum: Object.values(RoleEnum),
+            enum: RoleEnum,
             default: RoleEnum.User,
         },
         provider: {
             type: String,
-            enum: Object.values(ProviderEnum),
+            enum: ProviderEnum,
             default: ProviderEnum.System,
         },
-        confirmEmail: Date,
-        confirmEmailOtp: String,
-        confirmEmailOtpCreatedAt: Date,
+        confirmEmail:  Date ,
+        confirmEmailOtp:  String ,
+        confirmEmailOtpCreatedAt: Date ,
         otpFailedAttempts: { type: Number, default: 0 },
-        otpBannedUntil: Date,
-        // deletedAt: Date,
+        otpBannedUntil: Date ,
+
         // deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-        // restoreAt: Date,
+        // restoreAt: {type: Date},
         // restoreBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         // picture: {
         //     secure_url: String,
         //     public_id: String,
         // },
+        profileImage:{type: String},
+        coverImages:[String],
         // coverImages: [
         //     {
         //         secure_url: String,
@@ -105,10 +110,10 @@ const userSchema = new Schema<IUser>(
 
 userSchema
     .virtual("fullName")
-    .get(function (this: IUser) {
+    .get(function () {
         return `${this.firstName} ${this.lastName}`;
     })
-    .set(function (this: IUser, value: string) {
+    .set(function (value: string) {
         const [firstName, lastName] = value?.split(" ") || [];
         this.set({ firstName, lastName });
     });
@@ -117,5 +122,5 @@ userSchema
 
 export const UserModel: Model<IUser> =
     mongoose.models.User || mongoose.model<IUser>("User", userSchema);
+export type HUserDocument = HydratedDocument<IUser>
 
-UserModel.syncIndexes();

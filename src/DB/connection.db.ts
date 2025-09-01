@@ -1,4 +1,5 @@
 import mongoose, { ConnectOptions } from "mongoose"
+import { UserModel } from "./models/user.model";
 
 const connectDB = async (): Promise<void> => {
     try {
@@ -11,6 +12,8 @@ const connectDB = async (): Promise<void> => {
         await mongoose.connect(uri, {
             serverSelectionTimeoutMS: 30000,
         } as ConnectOptions);
+
+        await UserModel.syncIndexes();
 
         console.log("DB connected successfully");
     } catch (error) {

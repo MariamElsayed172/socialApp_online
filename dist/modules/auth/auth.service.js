@@ -1,81 +1,103 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
-const nanoid_1 = require("nanoid");
-const DBService = __importStar(require("../../DB/db.service"));
 const user_model_1 = require("../../DB/models/user.model");
-const email_event_1 = require("../../utils/events/email.event");
+const email_event_1 = require("../../utils/event/email.event");
+const error_response_1 = require("../../utils/response/error.response");
+const user_repository_1 = require("../../DB/repository/user.repository");
+const hash_security_1 = require("../../utils/security/hash.security");
+const otp_1 = require("../../utils/otp");
+const token_security_1 = require("../../utils/security/token.security");
+const google_auth_library_1 = require("google-auth-library");
 class AuthenticationService {
+    userModel = new user_repository_1.UserRepository(user_model_1.UserModel);
     constructor() { }
+    async verifyGmailAccount(idToken) {
+        const client = new google_auth_library_1.OAuth2Client();
+        const ticket = await client.verifyIdToken({
+            idToken,
+            audience: process.env.WEB_CLIENT_ID?.split(",") || [],
+        });
+        const payload = ticket.getPayload();
+        if (!payload?.email_verified) {
+            throw new error_response_1.BadRequestException("Fail to verify this google account");
+        }
+        return payload;
+    }
     signup = async (req, res) => {
         let { fullName, email, password, phone } = req.body;
-        if (await DBService.findOne({ model: user_model_1.UserModel, filter: { email } })) {
-            throw new Error("Email exist", { cause: 409 });
+        if (await this.userModel.findOne({ filter: { email }, options: { lean: true } })) {
+            throw new error_response_1.ConflictException("Email exist");
         }
-        const [user] = await DBService.create({
-            model: user_model_1.UserModel,
-            data: [
-                {
+        const user = await this.userModel.createUser({
+            data: [{
                     fullName,
                     email,
-                    password,
+                    password: await (0, hash_security_1.generateHash)(password),
                     phone,
-                }
-            ]
+                }]
         });
+        if (!user) {
+            throw new error_response_1.BadRequestException("Fail to signup");
+        }
         await this.sendConfirmEmailOtp({ email });
         return res.status(201).json({ message: "Done", data: { user } });
     };
+    signupWithGmail = async (req, res) => {
+        const { idToken } = req.body;
+        const { email, family_name, given_name, name, picture } = await this.verifyGmailAccount(idToken);
+        const user = await this.userModel.findOne({
+            filter: {
+                email,
+            },
+        });
+        if (user) {
+            if (user.provider === user_model_1.ProviderEnum.Google) {
+                return await this.loginWithGmail(req, res);
+            }
+            throw new error_response_1.ConflictException(`Email exist with another provider ::: ${user.provider}`);
+        }
+        const [newUser] = (await this.userModel.create({
+            data: [{ email: email, firstName: given_name, lastName: family_name, profileImage: picture, confirmEmail: new Date(), provider: user_model_1.ProviderEnum.Google }]
+        })) || [];
+        if (!newUser) {
+            throw new error_response_1.BadRequestException("Fail to signup with gmail please try again later");
+        }
+        const credentials = await (0, token_security_1.createLoginCredentials)(newUser);
+        return res.status(201).json({ message: "Done", data: { credentials } });
+    };
+    loginWithGmail = async (req, res) => {
+        const { idToken } = req.body;
+        const { email } = await this.verifyGmailAccount(idToken);
+        const user = await this.userModel.findOne({
+            filter: {
+                email,
+                provider: user_model_1.ProviderEnum.Google
+            },
+        });
+        if (!user) {
+            throw new error_response_1.NotFoundException(`Not register account or registered with another provider`);
+        }
+        const credentials = await (0, token_security_1.createLoginCredentials)(user);
+        return res.status(200).json({ message: "Done", data: { credentials } });
+    };
     login = async (req, res) => {
         const { email, password } = req.body;
-        const user = await DBService.findOne({ model: user_model_1.UserModel, filter: { email } });
+        const user = await this.userModel.findOne({ filter: { email, provider: user_model_1.ProviderEnum.System } });
         if (!user) {
-            throw new Error("In-valid email or password", { cause: 404 });
+            throw new error_response_1.NotFoundException("In-valid email or password");
         }
         if (!user.confirmEmail) {
-            throw new Error("Please verify you account first");
+            throw new error_response_1.BadRequestException("Please verify you account first");
         }
-        if (password !== user.password) {
-            throw new Error("In-valid email or password", { cause: 404 });
+        if (!await (0, hash_security_1.compareHash)(password, user.password)) {
+            throw new error_response_1.NotFoundException("In-valid email or password");
         }
-        return res.status(200).json({ message: "Done", data: { user } });
+        const credentials = await (0, token_security_1.createLoginCredentials)(user);
+        return res.status(200).json({ message: "Done", data: { credentials } });
     };
     confirmEmail = async (req, res) => {
         const { email, otp } = req.body;
-        const user = await DBService.findOne({
-            model: user_model_1.UserModel,
+        const user = await this.userModel.findOne({
             filter: {
                 email,
                 confirmEmail: { $exists: false },
@@ -83,7 +105,7 @@ class AuthenticationService {
             }
         });
         if (!user) {
-            throw new Error("In-valid account or already verified", { cause: 404 });
+            throw new error_response_1.NotFoundException("In-valid account or already verified");
         }
         const now = new Date();
         if (user.otpBannedUntil && user.otpBannedUntil > now) {
@@ -95,37 +117,34 @@ class AuthenticationService {
                 throw new Error("OTP has expired", { cause: 410 });
             }
         }
-        if (otp !== user.confirmEmailOtp) {
+        if (!await (0, hash_security_1.compareHash)(otp, user.confirmEmailOtp)) {
             const attempts = user.otpFailedAttempts + 1;
             const updateData = { otpFailedAttempts: attempts };
             if (attempts >= 5) {
                 user.otpBannedUntil = new Date(now.getTime() + 5 * 60 * 1000);
                 updateData.otpFailedAttempts = 0;
             }
-            await DBService.updateOne({
-                model: user_model_1.UserModel,
+            await this.userModel.updateOne({
                 filter: { email },
                 data: updateData
             });
-            throw new Error("Invalid OTP", { cause: 401 });
+            throw new error_response_1.ConflictException("Invalid OTP");
         }
-        const updateUser = await DBService.updateOne({
-            model: user_model_1.UserModel,
+        const updateUser = await this.userModel.updateOne({
             filter: { email },
             data: {
                 confirmEmail: Date.now(),
-                $unset: { confirmEmailOtp: true, otpFailedAttempts: 0 },
+                $unset: { confirmEmailOtp: true, otpFailedAttempts: true, confirmEmailOtpCreatedAt: true, otpBannedUntil: true },
                 $inc: { __v: 1 }
             }
         });
         if (!updateUser.matchedCount) {
             throw new Error("fail to confirm user email");
         }
-        return res.status(200).json({ message: "Done", data: { user } });
+        return res.status(200).json({ message: "Done", data: { updateUser } });
     };
     sendConfirmEmailOtp = async ({ email }) => {
-        const user = await DBService.findOne({
-            model: user_model_1.UserModel,
+        const user = await this.userModel.findOne({
             filter: {
                 email,
                 confirmEmail: { $exists: false },
@@ -144,18 +163,69 @@ class AuthenticationService {
                 throw new Error("OTP is not expired, so please wait", { cause: 410 });
             }
         }
-        const otp = (0, nanoid_1.customAlphabet)("0123456789", 6)();
-        await DBService.updateOne({
-            model: user_model_1.UserModel,
+        const otp = (0, otp_1.generateNumberOtp)();
+        await this.userModel.updateOne({
             filter: { email },
             data: {
-                confirmEmailOtp: otp,
+                confirmEmailOtp: await (0, hash_security_1.generateHash)(String(otp)),
                 confirmEmailOtpCreatedAt: now,
                 otpFailedAttempts: 0,
                 otpBannedUntil: null,
             },
         });
         email_event_1.emailEvent.emit("confirmEmail", { to: email, otp });
+    };
+    sendForgetCode = async (req, res) => {
+        const { email } = req.body;
+        const user = await this.userModel.findOne({ filter: { email, provider: user_model_1.ProviderEnum.System, confirmEmail: { $exists: true } } });
+        if (!user) {
+            throw new error_response_1.NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account ]");
+        }
+        const otp = (0, otp_1.generateNumberOtp)();
+        const result = await this.userModel.updateOne({
+            filter: { email },
+            data: {
+                resetPasswordOtp: await (0, hash_security_1.generateHash)(String(otp))
+            }
+        });
+        if (!result.matchedCount) {
+            throw new error_response_1.BadRequestException("Fail to send the reset code please try again later");
+        }
+        email_event_1.emailEvent.emit("resetPassword", { to: email, otp });
+        return res.status(200).json({ message: "Done" });
+    };
+    verifyForgetCode = async (req, res) => {
+        const { email, otp } = req.body;
+        const user = await this.userModel.findOne({ filter: { email, provider: user_model_1.ProviderEnum.System, resetPasswordOtp: { $exists: true } } });
+        if (!user) {
+            throw new error_response_1.NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account , missing resetPasswordOtp ]");
+        }
+        if (!await (0, hash_security_1.compareHash)(otp, user.resetPasswordOtp)) {
+            throw new error_response_1.ConflictException("In-valid otp ]");
+        }
+        return res.status(200).json({ message: "Done" });
+    };
+    resetForgetCode = async (req, res) => {
+        const { email, otp, password } = req.body;
+        const user = await this.userModel.findOne({ filter: { email, provider: user_model_1.ProviderEnum.System, resetPasswordOtp: { $exists: true } } });
+        if (!user) {
+            throw new error_response_1.NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account , missing resetPasswordOtp ]");
+        }
+        if (!await (0, hash_security_1.compareHash)(otp, user.resetPasswordOtp)) {
+            throw new error_response_1.ConflictException("In-valid otp ]");
+        }
+        const result = await this.userModel.updateOne({
+            filter: { email },
+            data: {
+                password: await (0, hash_security_1.generateHash)(password),
+                changeCredentialsTime: new Date(),
+                $unset: { resetPasswordOtp: 1 }
+            }
+        });
+        if (!result.matchedCount) {
+            throw new error_response_1.BadRequestException("Fail to reset password");
+        }
+        return res.status(200).json({ message: "Done" });
     };
 }
 exports.default = new AuthenticationService();

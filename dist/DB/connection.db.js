@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
+const user_model_1 = require("./models/user.model");
 const connectDB = async () => {
     try {
         const uri = process.env.DB_URI;
@@ -13,6 +14,7 @@ const connectDB = async () => {
         await mongoose_1.default.connect(uri, {
             serverSelectionTimeoutMS: 30000,
         });
+        await user_model_1.UserModel.syncIndexes();
         console.log("DB connected successfully");
     }
     catch (error) {
