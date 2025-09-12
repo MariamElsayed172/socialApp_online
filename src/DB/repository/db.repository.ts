@@ -1,4 +1,4 @@
-import { Model, FilterQuery, UpdateQuery, CreateOptions, HydratedDocument, RootFilterQuery, ProjectionType, QueryOptions, FlattenMaps, PopulateOptions, MongooseUpdateQueryOptions, QueryWithHelpers, UpdateWriteOpResult } from "mongoose";
+import { Model, FilterQuery, UpdateQuery, CreateOptions, HydratedDocument, RootFilterQuery, ProjectionType, QueryOptions, FlattenMaps, PopulateOptions, MongooseUpdateQueryOptions, QueryWithHelpers, UpdateWriteOpResult, Types, DeleteResult } from "mongoose";
 import { BadRequestException } from "../../utils/response/error.response";
 
 export type Lean<T> = HydratedDocument<FlattenMaps<T>>
@@ -45,7 +45,31 @@ export abstract class DBRepository<TDocument> {
         data: UpdateQuery<TDocument>;
         options?: MongooseUpdateQueryOptions<TDocument> | null;
     }): Promise<UpdateWriteOpResult> {
-        return await this.model.updateOne(filter, data , options);
+        return await this.model.updateOne(filter, data, options);
+    };
+
+    async findByIdAndUpdate({
+        id,
+        update,
+        options = { new: true },
+    }: {
+        id: Types.ObjectId;
+        update?: UpdateQuery<TDocument>;
+        options?: QueryOptions<TDocument> | null;
+    }): Promise<HydratedDocument<TDocument> | Lean<TDocument> | null> {
+        return this.model.findByIdAndUpdate(
+            id,
+            { ...update, $inc: { __v: 1 } },
+            options,
+        )
+    };
+
+    async deleteOne({
+        filter,
+    }: {
+        filter: RootFilterQuery<TDocument>;
+    }): Promise<DeleteResult> {
+        return this.model.deleteOne(filter);
     };
 }
 // export const findOne = async <T>({
@@ -128,6 +152,8 @@ export const findOneAndUpdate = async <T>({
         )
         .select(select)
 };
+
+
 
 // deleteOne
 export const deleteOne = async <T>({

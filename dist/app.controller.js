@@ -14,6 +14,10 @@ const auth_controller_1 = __importDefault(require("./modules/auth/auth.controlle
 const user_controller_1 = __importDefault(require("./modules/user/user.controller"));
 const error_response_1 = require("./utils/response/error.response");
 const connection_db_1 = __importDefault(require("./DB/connection.db"));
+const s3_config_1 = require("./utils/multer/s3.config");
+const node_util_1 = require("node:util");
+const node_stream_1 = require("node:stream");
+const createS3WriteStreamPipe = (0, node_util_1.promisify)(node_stream_1.pipeline);
 const limiter = (0, express_rate_limit_1.rateLimit)({
     windowMs: 60 * 60000,
     limit: 2000,
@@ -30,6 +34,32 @@ const bootstrap = async () => {
     });
     app.use("/auth", auth_controller_1.default);
     app.use("/user", user_controller_1.default);
+    app.get("/upload/pre-signed/*path", async (req, res) => {
+        const { downloadName, download = "false", expiresIn = 120 } = req.query;
+        const { path } = req.params;
+        const Key = path.join("/");
+        const url = await (0, s3_config_1.createGetPreSignedLink)({
+            Key,
+            downloadName: downloadName,
+            download,
+            expiresIn,
+        });
+        return res.json({ message: "Done", data: { url } });
+    });
+    app.get("/upload/*path", async (req, res) => {
+        const { downloadName, download = "false" } = req.query;
+        const { path } = req.params;
+        const Key = path.join("/");
+        const s3Response = await (0, s3_config_1.getFile)({ Key });
+        if (!s3Response?.Body) {
+            throw new error_response_1.BadRequestException("fail to fetch this asset");
+        }
+        res.setHeader("Content-type", `${s3Response.ContentType || "application/octet-stream"}`);
+        if (download === "true") {
+            res.setHeader("Content-Disposition", `attachment; filename="${downloadName || Key.split("/").pop()}"`);
+        }
+        return await createS3WriteStreamPipe(s3Response.Body, res);
+    });
     app.use("{/*dummy}", (req, res) => {
         return res.status(404).json({ message: "Invalid application routing plz check the method and url" });
     });

@@ -1,13 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const user_model_1 = require("../../DB/models/user.model");
-const email_event_1 = require("../../utils/event/email.event");
-const error_response_1 = require("../../utils/response/error.response");
+const email_event_1 = require("../../utils/email/email.event");
 const user_repository_1 = require("../../DB/repository/user.repository");
-const hash_security_1 = require("../../utils/security/hash.security");
 const otp_1 = require("../../utils/otp");
+const error_response_1 = require("../../utils/response/error.response");
+const hash_security_1 = require("../../utils/security/hash.security");
 const token_security_1 = require("../../utils/security/token.security");
 const google_auth_library_1 = require("google-auth-library");
+const success_response_1 = require("../../utils/response/success.response");
 class AuthenticationService {
     userModel = new user_repository_1.UserRepository(user_model_1.UserModel);
     constructor() { }
@@ -28,7 +29,7 @@ class AuthenticationService {
         if (await this.userModel.findOne({ filter: { email }, options: { lean: true } })) {
             throw new error_response_1.ConflictException("Email exist");
         }
-        const user = await this.userModel.createUser({
+        await this.userModel.createUser({
             data: [{
                     fullName,
                     email,
@@ -36,11 +37,8 @@ class AuthenticationService {
                     phone,
                 }]
         });
-        if (!user) {
-            throw new error_response_1.BadRequestException("Fail to signup");
-        }
         await this.sendConfirmEmailOtp({ email });
-        return res.status(201).json({ message: "Done", data: { user } });
+        return (0, success_response_1.successResponse)({ res, statusCode: 201 });
     };
     signupWithGmail = async (req, res) => {
         const { idToken } = req.body;
@@ -63,7 +61,7 @@ class AuthenticationService {
             throw new error_response_1.BadRequestException("Fail to signup with gmail please try again later");
         }
         const credentials = await (0, token_security_1.createLoginCredentials)(newUser);
-        return res.status(201).json({ message: "Done", data: { credentials } });
+        return (0, success_response_1.successResponse)({ res, statusCode: 201, data: { credentials } });
     };
     loginWithGmail = async (req, res) => {
         const { idToken } = req.body;
@@ -78,7 +76,7 @@ class AuthenticationService {
             throw new error_response_1.NotFoundException(`Not register account or registered with another provider`);
         }
         const credentials = await (0, token_security_1.createLoginCredentials)(user);
-        return res.status(200).json({ message: "Done", data: { credentials } });
+        return (0, success_response_1.successResponse)({ res, data: { credentials } });
     };
     login = async (req, res) => {
         const { email, password } = req.body;
@@ -93,7 +91,7 @@ class AuthenticationService {
             throw new error_response_1.NotFoundException("In-valid email or password");
         }
         const credentials = await (0, token_security_1.createLoginCredentials)(user);
-        return res.status(200).json({ message: "Done", data: { credentials } });
+        return (0, success_response_1.successResponse)({ res, data: { credentials } });
     };
     confirmEmail = async (req, res) => {
         const { email, otp } = req.body;
@@ -141,7 +139,7 @@ class AuthenticationService {
         if (!updateUser.matchedCount) {
             throw new Error("fail to confirm user email");
         }
-        return res.status(200).json({ message: "Done", data: { updateUser } });
+        return (0, success_response_1.successResponse)({ res });
     };
     sendConfirmEmailOtp = async ({ email }) => {
         const user = await this.userModel.findOne({

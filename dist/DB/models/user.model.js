@@ -88,7 +88,12 @@ const userSchema = new mongoose_1.Schema({
     confirmEmailOtpCreatedAt: Date,
     otpFailedAttempts: { type: Number, default: 0 },
     otpBannedUntil: Date,
+    freezedAt: Date,
+    freezedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
+    restoredAt: Date,
+    restoredBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
     profileImage: { type: String },
+    temProfileImage: { type: String },
     coverImages: [String],
 }, {
     timestamps: true,

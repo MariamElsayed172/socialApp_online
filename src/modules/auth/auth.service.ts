@@ -1,15 +1,17 @@
 import type { Request, Response } from "express";
 import { ProviderEnum, UserModel } from "../../DB/models/user.model";
-import { emailEvent } from "../../utils/event/email.event";
+import { emailEvent } from "../../utils/email/email.event";
 import type { IConfirmEmailBodyInputsDTO, IForgotCodeBodyInputsDTO, IGmail, ILoginBodyInputsDTO, IResetCodeBodyInputsDTO, ISignupBodyInputsDTO, IVerifyCodeBodyInputsDTO } from "./auth.dto";
 
-import { BadRequestException, ConflictException, NotFoundException } from "../../utils/response/error.response";
 import { UserRepository } from "../../DB/repository/user.repository";
-import { compareHash, generateHash } from "../../utils/security/hash.security";
 import { generateNumberOtp } from "../../utils/otp";
+import { BadRequestException, ConflictException, NotFoundException } from "../../utils/response/error.response";
+import { compareHash, generateHash } from "../../utils/security/hash.security";
 import { createLoginCredentials } from "../../utils/security/token.security";
 
 import { OAuth2Client, type TokenPayload } from 'google-auth-library';
+import { successResponse } from "../../utils/response/success.response";
+import { ILoginResponse } from "./auth.entities";
 
 
 class AuthenticationService {
@@ -44,11 +46,11 @@ class AuthenticationService {
     signup = async (req: Request, res: Response): Promise<Response> => {
 
         let { fullName, email, password, phone }: ISignupBodyInputsDTO = req.body;
-        // console.log({ fullName, email, password });
+
         if (await this.userModel.findOne({ filter: { email }, options: { lean: true } })) {
             throw new ConflictException("Email exist")
         }
-        const user = await this.userModel.createUser({
+        await this.userModel.createUser({
             data: [{
                 fullName,
                 email,
@@ -57,12 +59,9 @@ class AuthenticationService {
             }]
         });
 
-        if (!user) {
-            throw new BadRequestException("Fail to signup")
-        }
 
         await this.sendConfirmEmailOtp({ email })
-        return res.status(201).json({ message: "Done", data: { user } })
+        return successResponse({ res, statusCode: 201 })
     }
 
     signupWithGmail = async (req: Request, res: Response): Promise<Response> => {
@@ -90,7 +89,7 @@ class AuthenticationService {
         const credentials = await createLoginCredentials(newUser);
 
 
-        return res.status(201).json({ message: "Done", data: { credentials } })
+        return successResponse<ILoginResponse>({ res, statusCode: 201, data: { credentials } })
     }
 
     loginWithGmail = async (req: Request, res: Response): Promise<Response> => {
@@ -109,7 +108,7 @@ class AuthenticationService {
 
         const credentials = await createLoginCredentials(user);
 
-        return res.status(200).json({ message: "Done", data: { credentials } })
+        return successResponse<ILoginResponse>({ res, data: { credentials } })
     }
 
     login = async (req: Request, res: Response): Promise<Response> => {
@@ -128,7 +127,7 @@ class AuthenticationService {
         }
 
         const credentials = await createLoginCredentials(user);
-        return res.status(200).json({ message: "Done", data: { credentials } })
+        return successResponse<ILoginResponse>({ res, data: { credentials } })
     }
 
 
@@ -192,7 +191,7 @@ class AuthenticationService {
         if (!updateUser.matchedCount) {
             throw new Error("fail to confirm user email")
         }
-        return res.status(200).json({ message: "Done", data: { updateUser } })
+        return successResponse({ res })
 
     }
 
@@ -261,10 +260,10 @@ class AuthenticationService {
         return res.status(200).json({ message: "Done" })
     }
 
-    
+
     verifyForgetCode = async (req: Request, res: Response): Promise<Response> => {
         const { email, otp }: IVerifyCodeBodyInputsDTO = req.body
-        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, resetPasswordOtp:{$exists:true} } })
+        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, resetPasswordOtp: { $exists: true } } })
         if (!user) {
             throw new NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account , missing resetPasswordOtp ]")
         }
@@ -272,13 +271,13 @@ class AuthenticationService {
         if (!await compareHash(otp, user.resetPasswordOtp as string)) {
             throw new ConflictException("In-valid otp ]")
         }
-        
+
         return res.status(200).json({ message: "Done" })
     }
 
     resetForgetCode = async (req: Request, res: Response): Promise<Response> => {
         const { email, otp, password }: IResetCodeBodyInputsDTO = req.body
-        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, resetPasswordOtp:{$exists:true} } })
+        const user = await this.userModel.findOne({ filter: { email, provider: ProviderEnum.System, resetPasswordOtp: { $exists: true } } })
         if (!user) {
             throw new NotFoundException("In-valid account due to one of the following reasons [not register , invalid provider , not confirmed account , missing resetPasswordOtp ]")
         }
@@ -291,14 +290,14 @@ class AuthenticationService {
             data: {
                 password: await generateHash(password),
                 changeCredentialsTime: new Date(),
-                $unset:{resetPasswordOtp:1}
+                $unset: { resetPasswordOtp: 1 }
             }
         })
         if (!result.matchedCount) {
             throw new BadRequestException("Fail to reset password")
         }
 
-        
+
         return res.status(200).json({ message: "Done" })
     }
 }

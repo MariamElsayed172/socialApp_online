@@ -1,7 +1,7 @@
 import EventEmitter from "node:events";
-import { sendEmail } from "../email/email.service";
-import { verifyEmailTemplate } from "../email/templates/verify.email.template";
 import Mail from "nodemailer/lib/mailer";
+import { sendEmail } from "./email.service";
+import { verifyEmailTemplate } from "./templates/verify.email.template";
 
 export const emailEvent = new EventEmitter()
 

@@ -25,6 +25,14 @@ class DBRepository {
         return await this.model.updateOne(filter, data, options);
     }
     ;
+    async findByIdAndUpdate({ id, update, options = { new: true }, }) {
+        return this.model.findByIdAndUpdate(id, { ...update, $inc: { __v: 1 } }, options);
+    }
+    ;
+    async deleteOne({ filter, }) {
+        return this.model.deleteOne(filter);
+    }
+    ;
 }
 exports.DBRepository = DBRepository;
 const findById = async ({ model, id, select = "", }) => {

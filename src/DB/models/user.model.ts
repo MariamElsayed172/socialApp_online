@@ -1,5 +1,5 @@
 
-import mongoose, { Schema, Document, Model, HydratedDocument } from "mongoose";
+import mongoose, { Schema, Document, Model, HydratedDocument, Types } from "mongoose";
 
 export enum GenderEnum {
     Male = "male",
@@ -25,21 +25,26 @@ export interface IUser extends Document {
     gender: GenderEnum;
     role: RoleEnum;
     provider: ProviderEnum;
-    confirmEmail?: Date ;
+    confirmEmail?: Date;
     confirmEmailOtp?: string;
-    confirmEmailOtpCreatedAt?: Date ;
+    confirmEmailOtpCreatedAt?: Date;
     resetPasswordOtp?: string;
-    changeCredentialsTime?:  Date ;
+    changeCredentialsTime?: Date;
     otpFailedAttempts?: number;
-    otpBannedUntil?: Date ;
-    createdAt:  Date ;
-    deletedAt?:  Date ;
+    otpBannedUntil?: Date;
+    createdAt: Date;
+    deletedAt?: Date;
+    freezedAt?: Date;
+    freezedBy?: Types.ObjectId;
+    restoredAt?: Date;
+    restoredBy?: Types.ObjectId;
     // deletedBy?: mongoose.Types.ObjectId;
     // restoreAt?: {type: Date};
     // restoreBy?: mongoose.Types.ObjectId;
     // picture?: { secure_url: string; public_id: string };
-    profileImage?:string;
-    coverImages?:string[];
+    profileImage?: string;
+    temProfileImage?: string;
+    coverImages?: string[];
     // coverImages?: { secure_url: string; public_id: string }[];
     fullName: string;
 }
@@ -53,7 +58,7 @@ const userSchema = new Schema<IUser>(
         password: {
             type: String,
             required: function () {
-                return this.provider === ProviderEnum.Google? false:true;
+                return this.provider === ProviderEnum.Google ? false : true;
             },
         },
         phone: {
@@ -79,12 +84,16 @@ const userSchema = new Schema<IUser>(
             enum: ProviderEnum,
             default: ProviderEnum.System,
         },
-        confirmEmail:  Date ,
-        confirmEmailOtp:  String ,
-        confirmEmailOtpCreatedAt: Date ,
+        confirmEmail: Date,
+        confirmEmailOtp: String,
+        confirmEmailOtpCreatedAt: Date,
         otpFailedAttempts: { type: Number, default: 0 },
-        otpBannedUntil: Date ,
+        otpBannedUntil: Date,
 
+        freezedAt: Date,
+        freezedBy: { type: Schema.Types.ObjectId, ref: "User" },
+        restoredAt: Date,
+        restoredBy: { type: Schema.Types.ObjectId, ref: "User" },
         // deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         // restoreAt: {type: Date},
         // restoreBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
@@ -92,8 +101,9 @@ const userSchema = new Schema<IUser>(
         //     secure_url: String,
         //     public_id: String,
         // },
-        profileImage:{type: String},
-        coverImages:[String],
+        profileImage: { type: String },
+        temProfileImage: { type: String },
+        coverImages: [String],
         // coverImages: [
         //     {
         //         secure_url: String,

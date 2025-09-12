@@ -42,8 +42,18 @@ const user_service_1 = __importDefault(require("./user.service"));
 const validation_middleware_1 = require("../../middleware/validation.middleware");
 const validators = __importStar(require("./user.validation"));
 const token_security_1 = require("../../utils/security/token.security");
+const cloud_multer_1 = require("../../utils/multer/cloud.multer");
+const user_authorization_1 = require("./user.authorization");
 const router = (0, express_1.Router)();
 router.get("/", (0, authentication_middleware_1.authentication)(), user_service_1.default.profile);
+router.patch("/profile-image", (0, authentication_middleware_1.authentication)(), user_service_1.default.profileImage);
+router.patch("/profile-cover-image", (0, authentication_middleware_1.authentication)(), (0, cloud_multer_1.cloudFileUpload)({
+    validation: cloud_multer_1.fileValidation.image,
+    storageApproach: cloud_multer_1.storageEnum.disk
+}).array("images", 2), user_service_1.default.profileCoverImage);
+router.delete("{/:userId}/freeze-account", (0, authentication_middleware_1.authentication)(), (0, validation_middleware_1.validation)(validators.freezeAccount), user_service_1.default.freezeAccount);
+router.delete("/:userId", (0, authentication_middleware_1.authorization)(user_authorization_1.endpoint.hardDelete), (0, validation_middleware_1.validation)(validators.hardDelete), user_service_1.default.hardDeleteAccount);
+router.patch("/:userId/restore-account", (0, authentication_middleware_1.authorization)(user_authorization_1.endpoint.restoreAccount), (0, validation_middleware_1.validation)(validators.restoreAccount), user_service_1.default.restoreAccount);
 router.post("/refresh-token", (0, authentication_middleware_1.authentication)(token_security_1.TokenEnum.refresh), user_service_1.default.refreshToken);
 router.post("/logout", (0, authentication_middleware_1.authentication)(), (0, validation_middleware_1.validation)(validators.logout), user_service_1.default.logout);
 exports.default = router;
