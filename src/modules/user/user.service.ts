@@ -2,30 +2,32 @@ import { Response, Request } from "express";
 import { IFreezeAccountDTO, IHardDeleteAccountDTO, ILogoutDto, IRestoreAccountDTO } from "./user.dto";
 import { Types, UpdateQuery } from "mongoose";
 import { createLoginCredentials, createRevokeToken, LogoutEnum } from "../../utils/security/token.security";
-import { HUserDocument, IUser, RoleEnum, UserModel } from "../../DB/models/user.model";
-import { UserRepository } from "../../DB/repository/user.repository";
-import { TokenRepository } from "../../DB/repository/token.repository";
-import { TokenModel } from "../../DB/models/token.model";
+
 import { JwtPayload } from "jsonwebtoken";
-import { createPreSignedUploadLink, deleteFiles, deleteFolderByPrefix, uploadFiles } from "../../utils/multer/s3.config";
+import { createGetPreSignedLink, createPreSignedUploadLink, deleteFiles, deleteFolderByPrefix, uploadFiles } from "../../utils/multer/s3.config";
 import { storageEnum } from "../../utils/multer/cloud.multer";
-import { BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from "../../utils/response/error.response";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from "../../utils/response/error.response";
 import { s3Event } from "../../utils/multer/s3.events";
 import { successResponse } from "../../utils/response/success.response";
 import { IProfileResponse, IUserResponse } from "./user.entities";
 import { ILoginResponse } from "../auth/auth.entities";
+import { PostRepository, UserRepository, PostModel, HUserDocument, IUser, RoleEnum, UserModel, FriendRequest, FriendRequestRepository } from "../../DB";
+
 
 class UserService {
     private userModel = new UserRepository(UserModel)
-    private tokenModel = new TokenRepository(TokenModel)
+    private friendRequestModel = new FriendRequestRepository(FriendRequest)
+    private postModel = new PostRepository(PostModel)
     constructor() { }
 
 
     profileImage = async (req: Request, res: Response): Promise<Response> => {
 
+        // console.log("REQ BODY:", req.body);
         const { ContentType, Originalname }: { ContentType: string, Originalname: string } = req.body
 
-        const { url, key } = await createPreSignedUploadLink({ ContentType, Originalname, path: `users/${req.decoded?._id}` })
+        const { url, key } = await createPreSignedUploadLink({ ContentType, Originalname, path: `users/${req.user?._id}` })
+        console.log("UPLOAD KEY:", key);
         const user = await this.userModel.findByIdAndUpdate({
             id: req.user?._id as Types.ObjectId,
             update: {
@@ -36,7 +38,9 @@ class UserService {
         if (!user) {
             throw new BadRequestException("Fail to update user profile image")
         }
-        s3Event.emit("trackProfileImageUpload", { userId: req.user?._id, oldKey: req.user?.profileImage, key, expiresIn: 30000 })
+        console.log("GET KEY:", key);
+
+        s3Event.emit("trackProfileImageUpload", { userId: req.user?._id, oldKey: req.user?.profileImage, key, expiresIn: 3000 })
         return successResponse<IProfileResponse>({ res, data: { url } })
     }
 
@@ -62,11 +66,119 @@ class UserService {
         return successResponse<IUserResponse>({ res, data: { user } })
     }
 
+
     profile = async (req: Request, res: Response): Promise<Response> => {
         if (!req.user) {
             throw new UnauthorizedException("missing user details");
         }
-        return successResponse<IUserResponse>({ res, data: { user: req.user } })
+        const profile = await this.userModel.findById({
+            id:req.user?._id as Types.ObjectId,
+            options:{
+                populate:[
+                    {
+                        path:"friends",
+                        select:"firstName lastName email gender profilePicture",
+                    }
+                ]
+            }
+        })
+        if(!profile){
+            throw new NotFoundException("fail to find user profile")
+        }
+        
+        return successResponse<IUserResponse>({ res, data: { user: profile } })
+    }
+
+    dashboard = async (req: Request, res: Response): Promise<Response> => {
+        const results = await Promise.allSettled([
+            this.userModel.find({ filter: {} }),
+            this.postModel.find({ filter: {} })
+        ])
+
+        return successResponse({ res, data: { results } })
+    }
+
+    changeRole = async (req: Request, res: Response): Promise<Response> => {
+        const { userId } = req.params as unknown as { userId: Types.ObjectId };
+        const { role }: { role: RoleEnum } = req.body
+        const denyRoles: RoleEnum[] = [role, RoleEnum.SuperAdmin]
+        if (req.user?.role === RoleEnum.Admin) {
+            denyRoles.push(RoleEnum.Admin)
+        }
+        const user = await this.userModel.findOneAndUpdate({
+            filter: {
+                _id: userId as Types.ObjectId,
+                role: { $nin: denyRoles }
+            },
+            update: {
+                role,
+            }
+        });
+        if (!user) {
+            throw new NotFoundException("fail to find matching result")
+        }
+
+        return successResponse({ res, })
+    }
+
+    sendFriendRequest = async (req: Request, res: Response): Promise<Response> => {
+        const { userId } = req.params as unknown as { userId: Types.ObjectId };
+        const checkFriendRequestExist = await this.friendRequestModel.findOne({
+            filter: {
+                createBy: { $in: [req.user?._id, userId] },
+                sendTo: { $in: [req.user?._id, userId] },
+            }
+        })
+        if (checkFriendRequestExist) {
+            throw new ConflictException("Friend request already exist")
+        }
+        const user = await this.userModel.findOne({ filter: { _id: userId } })
+
+        if (!user) {
+            throw new NotFoundException("invalid recipient")
+        }
+        const [friendRequest] = (await this.friendRequestModel.create({
+            data: [{
+                createBy: req.user?._id as Types.ObjectId,
+                sendTo: userId,
+            }]
+        })) || []
+        if (!friendRequest) {
+            throw new BadRequestException("something went wrong!!!")
+        }
+        return successResponse({ res, statusCode: 201 })
+    }
+
+    acceptFriendRequest = async (req: Request, res: Response): Promise<Response> => {
+        const { requestId } = req.params as unknown as { requestId: Types.ObjectId };
+        const friendRequest = await this.friendRequestModel.findOneAndUpdate({
+            filter: {
+                _id: requestId,
+                sendTo: req.user?._id,
+                acceptedAt: { $exists: false },
+            },
+            update: {
+                acceptedAt: new Date()
+            }
+        })
+        if (!friendRequest) {
+            throw new NotFoundException("fail to find matching result")
+        }
+        await Promise.all([
+            await this.userModel.updateOne({
+                filter: { _id: friendRequest.createBy },
+                data: {
+                    $addToSet: { friends: friendRequest.sendTo }
+                }
+            }),
+            await this.userModel.updateOne({
+                filter: { _id: friendRequest.sendTo },
+                data: {
+                    $addToSet: { friends: friendRequest.createBy }
+                }
+            }),
+        ])
+        return successResponse({ res })
     }
 
     freezeAccount = async (req: Request, res: Response): Promise<Response> => {

@@ -35,6 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserModel = exports.ProviderEnum = exports.RoleEnum = exports.GenderEnum = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+const hash_security_1 = require("../../utils/security/hash.security");
+const email_event_1 = require("../../utils/email/email.event");
 var GenderEnum;
 (function (GenderEnum) {
     GenderEnum["Male"] = "male";
@@ -44,6 +46,7 @@ var RoleEnum;
 (function (RoleEnum) {
     RoleEnum["User"] = "user";
     RoleEnum["Admin"] = "admin";
+    RoleEnum["SuperAdmin"] = "super-admin";
 })(RoleEnum || (exports.RoleEnum = RoleEnum = {}));
 var ProviderEnum;
 (function (ProviderEnum) {
@@ -51,8 +54,9 @@ var ProviderEnum;
     ProviderEnum["Google"] = "google";
 })(ProviderEnum || (exports.ProviderEnum = ProviderEnum = {}));
 const userSchema = new mongoose_1.Schema({
-    firstName: { type: String, required: true, minlength: 2, maxlength: 20 },
-    lastName: { type: String, required: true, minlength: 2, maxlength: 20 },
+    firstName: { type: String, required: true, minlength: 2, maxlength: 25 },
+    lastName: { type: String, required: true, minlength: 2, maxlength: 25 },
+    slug: { type: String, required: true, minlength: 5, maxlength: 51 },
     email: { type: String, required: true, unique: true },
     password: {
         type: String,
@@ -92,6 +96,7 @@ const userSchema = new mongoose_1.Schema({
     freezedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
     restoredAt: Date,
     restoredBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
+    friends: [{ type: mongoose_1.Schema.Types.ObjectId, ref: "User" }],
     profileImage: { type: String },
     temProfileImage: { type: String },
     coverImages: [String],
@@ -107,6 +112,37 @@ userSchema
 })
     .set(function (value) {
     const [firstName, lastName] = value?.split(" ") || [];
-    this.set({ firstName, lastName });
+    this.set({ firstName, lastName, slug: value.replaceAll(/\s+/g, "-") });
+});
+userSchema.pre("save", async function (next) {
+    this.wasNew = this.isNew;
+    if (this.isModified("password")) {
+        this.password = await (0, hash_security_1.generateHash)(this.password);
+    }
+    if (this.isModified("confirmEmailOtp")) {
+        this.confirmEmailPlainOtp = this.confirmEmailOtp;
+        this.confirmEmailOtp = await (0, hash_security_1.generateHash)(this.confirmEmailOtp);
+    }
+    next();
+});
+userSchema.post("save", async function (doc, next) {
+    const that = this;
+    if (that.wasNew && that.confirmEmailPlainOtp) {
+        email_event_1.emailEvent.emit("confirmEmail", {
+            to: this.email,
+            otp: that.confirmEmailPlainOtp
+        });
+    }
+    next();
+});
+userSchema.pre(["find", "findOne"], function (next) {
+    const query = this.getQuery();
+    if (query.paranoid == false) {
+        this.setQuery({ ...query });
+    }
+    else {
+        this.setQuery({ ...query, freezedAt: { $exists: false } });
+    }
+    next();
 });
 exports.UserModel = mongoose_1.default.models.User || mongoose_1.default.model("User", userSchema);

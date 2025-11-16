@@ -3,7 +3,6 @@ import { ProviderEnum, UserModel } from "../../DB/models/user.model";
 import { emailEvent } from "../../utils/email/email.event";
 import type { IConfirmEmailBodyInputsDTO, IForgotCodeBodyInputsDTO, IGmail, ILoginBodyInputsDTO, IResetCodeBodyInputsDTO, ISignupBodyInputsDTO, IVerifyCodeBodyInputsDTO } from "./auth.dto";
 
-import { UserRepository } from "../../DB/repository/user.repository";
 import { generateNumberOtp } from "../../utils/otp";
 import { BadRequestException, ConflictException, NotFoundException } from "../../utils/response/error.response";
 import { compareHash, generateHash } from "../../utils/security/hash.security";
@@ -12,6 +11,7 @@ import { createLoginCredentials } from "../../utils/security/token.security";
 import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { successResponse } from "../../utils/response/success.response";
 import { ILoginResponse } from "./auth.entities";
+import { UserRepository } from "../../DB/repository";
 
 
 class AuthenticationService {
@@ -50,17 +50,19 @@ class AuthenticationService {
         if (await this.userModel.findOne({ filter: { email }, options: { lean: true } })) {
             throw new ConflictException("Email exist")
         }
+        const otp = generateNumberOtp();
         await this.userModel.createUser({
             data: [{
                 fullName,
                 email,
-                password: await generateHash(password),
+                password,
+                confirmEmailOtp: String(otp),
                 phone,
             }]
         });
 
 
-        await this.sendConfirmEmailOtp({ email })
+        //await this.sendConfirmEmailOtp({ email, otp })
         return successResponse({ res, statusCode: 201 })
     }
 
@@ -196,7 +198,7 @@ class AuthenticationService {
     }
 
 
-    sendConfirmEmailOtp = async ({ email }: { email: string }) => {
+    sendConfirmEmailOtp = async ({ email, otp }: { email: string , otp: number}) => {
         const user = await this.userModel.findOne({
             filter: {
                 email,
@@ -225,13 +227,11 @@ class AuthenticationService {
             }
         }
 
-        const otp = generateNumberOtp();
 
         await this.userModel.updateOne({
             filter: { email },
             data: {
-                confirmEmailOtp: await generateHash(String(otp)),
-                confirmEmailOtpCreatedAt: now,
+                confirmEmailOtpCreatedAt: new Date(),
                 otpFailedAttempts: 0,
                 otpBannedUntil: null,
             },

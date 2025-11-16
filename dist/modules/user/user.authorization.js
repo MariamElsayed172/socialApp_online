@@ -6,4 +6,6 @@ exports.endpoint = {
     profile: [user_model_1.RoleEnum.User, user_model_1.RoleEnum.Admin],
     restoreAccount: [user_model_1.RoleEnum.Admin],
     hardDelete: [user_model_1.RoleEnum.Admin],
+    dashboard: [user_model_1.RoleEnum.Admin, user_model_1.RoleEnum.SuperAdmin],
+    changeRole: [user_model_1.RoleEnum.Admin, user_model_1.RoleEnum.SuperAdmin]
 };

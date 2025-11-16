@@ -3,10 +3,10 @@ import type { JwtPayload, Secret, SignOptions } from 'jsonwebtoken'
 import { sign, verify } from 'jsonwebtoken'
 import { HUserDocument, RoleEnum, UserModel } from '../../DB/models/user.model';
 import { BadRequestException, UnauthorizedException } from '../response/error.response';
-import { UserRepository } from '../../DB/repository/user.repository';
-import { TokenRepository } from '../../DB/repository/token.repository';
+import { UserRepository, TokenRepository } from '../../DB/repository';
 import { HTokenDocument, TokenModel } from '../../DB/models/token.model';
 
+const userModel = new UserRepository(UserModel);
 export enum SignatureLevelEnum {
     Bearer = "Bearer", System = "System"
 }
@@ -45,6 +45,7 @@ export const detectSignatureLevel = async (role: RoleEnum = RoleEnum.User): Prom
     let signatureLevel: SignatureLevelEnum = SignatureLevelEnum.Bearer;
     switch (role) {
         case RoleEnum.Admin:
+        case RoleEnum.SuperAdmin:
             signatureLevel = SignatureLevelEnum.System;
             break;
 
@@ -79,7 +80,7 @@ export const createLoginCredentials = async (user: HUserDocument) => {
     const signatures = await getSignatures(signatureLevel);
     const jwtid = uuid()
     const access_token = await generateToken({
-        payload: { _id: user._id },
+        payload: { _id: user._id  },
         secret: signatures.access_signature,
         options: { expiresIn: Number(process.env.ACCESS_TOKEN_EXPIRES_IN), jwtid }
     })

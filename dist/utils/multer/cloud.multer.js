@@ -14,7 +14,7 @@ var storageEnum;
     storageEnum["disk"] = "disk";
 })(storageEnum || (exports.storageEnum = storageEnum = {}));
 exports.fileValidation = {
-    image: ['image/jpeg', 'image/png', 'image/gif']
+    image: ['image/jpg', 'image/jpeg', 'image/png', 'image/gif']
 };
 const cloudFileUpload = ({ validation = [], storageApproach = storageEnum.memory, maxSizeMB = 2 }) => {
     const storage = storageApproach === storageEnum.memory ? multer_1.default.memoryStorage() : multer_1.default.diskStorage({

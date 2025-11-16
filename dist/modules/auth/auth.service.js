@@ -2,15 +2,15 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const user_model_1 = require("../../DB/models/user.model");
 const email_event_1 = require("../../utils/email/email.event");
-const user_repository_1 = require("../../DB/repository/user.repository");
 const otp_1 = require("../../utils/otp");
 const error_response_1 = require("../../utils/response/error.response");
 const hash_security_1 = require("../../utils/security/hash.security");
 const token_security_1 = require("../../utils/security/token.security");
 const google_auth_library_1 = require("google-auth-library");
 const success_response_1 = require("../../utils/response/success.response");
+const repository_1 = require("../../DB/repository");
 class AuthenticationService {
-    userModel = new user_repository_1.UserRepository(user_model_1.UserModel);
+    userModel = new repository_1.UserRepository(user_model_1.UserModel);
     constructor() { }
     async verifyGmailAccount(idToken) {
         const client = new google_auth_library_1.OAuth2Client();
@@ -29,15 +29,16 @@ class AuthenticationService {
         if (await this.userModel.findOne({ filter: { email }, options: { lean: true } })) {
             throw new error_response_1.ConflictException("Email exist");
         }
+        const otp = (0, otp_1.generateNumberOtp)();
         await this.userModel.createUser({
             data: [{
                     fullName,
                     email,
-                    password: await (0, hash_security_1.generateHash)(password),
+                    password,
+                    confirmEmailOtp: String(otp),
                     phone,
                 }]
         });
-        await this.sendConfirmEmailOtp({ email });
         return (0, success_response_1.successResponse)({ res, statusCode: 201 });
     };
     signupWithGmail = async (req, res) => {
@@ -141,7 +142,7 @@ class AuthenticationService {
         }
         return (0, success_response_1.successResponse)({ res });
     };
-    sendConfirmEmailOtp = async ({ email }) => {
+    sendConfirmEmailOtp = async ({ email, otp }) => {
         const user = await this.userModel.findOne({
             filter: {
                 email,
@@ -161,12 +162,10 @@ class AuthenticationService {
                 throw new Error("OTP is not expired, so please wait", { cause: 410 });
             }
         }
-        const otp = (0, otp_1.generateNumberOtp)();
         await this.userModel.updateOne({
             filter: { email },
             data: {
-                confirmEmailOtp: await (0, hash_security_1.generateHash)(String(otp)),
-                confirmEmailOtpCreatedAt: now,
+                confirmEmailOtpCreatedAt: new Date(),
                 otpFailedAttempts: 0,
                 otpBannedUntil: null,
             },

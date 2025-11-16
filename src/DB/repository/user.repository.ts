@@ -1,6 +1,6 @@
-import { Model, FilterQuery, UpdateQuery, CreateOptions, HydratedDocument } from "mongoose";
+import { Model, CreateOptions, HydratedDocument } from "mongoose";
 import { BadRequestException } from "../../utils/response/error.response";
-import { IUser } from "../models/user.model";
+import { IUser } from "../models";
 import { DBRepository } from "./db.repository";
 
 

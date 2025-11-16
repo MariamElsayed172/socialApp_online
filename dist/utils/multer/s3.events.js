@@ -7,7 +7,6 @@ const user_repository_1 = require("../../DB/repository/user.repository");
 const user_model_1 = require("../../DB/models/user.model");
 exports.s3Event = new node_events_1.EventEmitter({});
 exports.s3Event.on("trackProfileImageUpload", (data) => {
-    console.log({ data });
     setTimeout(async () => {
         const userModel = new user_repository_1.UserRepository(user_model_1.UserModel);
         try {
@@ -22,13 +21,16 @@ exports.s3Event.on("trackProfileImageUpload", (data) => {
             console.log('Done');
         }
         catch (error) {
-            console.log(error);
-            if (error.code === "NotSuchKey") {
+            if (error.code === "NoSuchKey") {
+                let unsetData = { temProfileImage: 1 };
+                if (!data.oldKey) {
+                    unsetData = { temProfileImage: 1, profileImage: 1 };
+                }
                 await userModel.updateOne({
                     filter: { _id: data.userId },
                     data: {
                         profileImage: data.oldKey,
-                        $unset: { temProfileImage: 1 },
+                        $unset: unsetData,
                     }
                 });
             }

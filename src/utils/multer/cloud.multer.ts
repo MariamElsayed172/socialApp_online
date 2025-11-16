@@ -10,17 +10,17 @@ export enum storageEnum {
 }
 
 export const fileValidation = {
-    image: ['image/jpeg', 'image/png', 'image/gif']
+    image: ['image/jpg', 'image/jpeg', 'image/png', 'image/gif']
 }
 
 export const cloudFileUpload = ({
     validation = [],
     storageApproach = storageEnum.memory,
-    maxSizeMB=2
+    maxSizeMB = 2
 }: {
     validation?: string[];
     storageApproach?: storageEnum;
-    maxSizeMB?:number;
+    maxSizeMB?: number;
 }): multer.Multer => {
     const storage =
         storageApproach === storageEnum.memory ? multer.memoryStorage() : multer.diskStorage({
@@ -43,5 +43,5 @@ export const cloudFileUpload = ({
 
         return callback(null, true);
     }
-    return multer({ fileFilter, limits:{fileSize:maxSizeMB * 1024 * 1024}, storage })
+    return multer({ fileFilter, limits: { fileSize: maxSizeMB * 1024 * 1024 }, storage })
 }
