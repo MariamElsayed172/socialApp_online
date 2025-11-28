@@ -4,20 +4,21 @@ import { Types, UpdateQuery } from "mongoose";
 import { createLoginCredentials, createRevokeToken, LogoutEnum } from "../../utils/security/token.security";
 
 import { JwtPayload } from "jsonwebtoken";
-import { createGetPreSignedLink, createPreSignedUploadLink, deleteFiles, deleteFolderByPrefix, uploadFiles } from "../../utils/multer/s3.config";
+import { createPreSignedUploadLink, deleteFiles, deleteFolderByPrefix, uploadFiles } from "../../utils/multer/s3.config";
 import { storageEnum } from "../../utils/multer/cloud.multer";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from "../../utils/response/error.response";
 import { s3Event } from "../../utils/multer/s3.events";
 import { successResponse } from "../../utils/response/success.response";
 import { IProfileResponse, IUserResponse } from "./user.entities";
 import { ILoginResponse } from "../auth/auth.entities";
-import { PostRepository, UserRepository, PostModel, HUserDocument, IUser, RoleEnum, UserModel, FriendRequest, FriendRequestRepository } from "../../DB";
+import { PostRepository, UserRepository, PostModel, HUserDocument, IUser, RoleEnum, UserModel, FriendRequest, FriendRequestRepository, ChatModel, ChatRepository } from "../../DB";
 
 
 class UserService {
     private userModel = new UserRepository(UserModel)
     private friendRequestModel = new FriendRequestRepository(FriendRequest)
     private postModel = new PostRepository(PostModel)
+    private chatModel = new ChatRepository(ChatModel)
     constructor() { }
 
 
@@ -85,8 +86,13 @@ class UserService {
         if(!profile){
             throw new NotFoundException("fail to find user profile")
         }
-        
-        return successResponse<IUserResponse>({ res, data: { user: profile } })
+        const groups = await this.chatModel.find({
+            filter:{
+                participants: {$in: req.user?._id as Types.ObjectId},
+                group:{$exists: true}
+            }
+        })
+        return successResponse<IUserResponse>({ res, data: { user: profile, groups } })
     }
 
     dashboard = async (req: Request, res: Response): Promise<Response> => {

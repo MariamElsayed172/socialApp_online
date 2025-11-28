@@ -14,20 +14,17 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit'
 
 //import module routing
-import { authRouter, userRouter, postRouter } from './modules';
+import { authRouter, userRouter, postRouter, initializeIo } from './modules';
 import { BadRequestException, globalErrorHandling } from './utils/response/error.response';
 import connectDB from './DB/connection.db';
 import { createGetPreSignedLink, getFile } from './utils/multer/s3.config';
 
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
+import { chatRouter } from './modules/chat';
 
 const createS3WriteStreamPipe = promisify(pipeline)
-import { Server, Socket } from 'socket.io'
-import { decodeToken, TokenEnum } from './utils/security/token.security';
-import { log } from 'node:console';
-import { HUserDocument } from './DB';
-import { JwtPayload } from 'jsonwebtoken';
+
 
 //handle base rate limit on all api requests
 const limiter = rateLimit({
@@ -37,14 +34,6 @@ const limiter = rateLimit({
     statusCode: 429
 })
 
-const connectedSockets = new Map<string, string[]>();
-
-interface IAuthSocket extends Socket {
-    credentials?: {
-        user: Partial<HUserDocument>,
-        decoded: JwtPayload,
-    }
-}
 //app-start-point
 const bootstrap = async (): Promise<void> => {
 
@@ -69,22 +58,7 @@ const bootstrap = async (): Promise<void> => {
     app.use("/auth", authRouter)
     app.use("/user", userRouter)
     app.use("/post", postRouter)
-
-    //test-s3
-    // app.get("/test", async (req: Request, res: Response) => {
-    //     // const { Key } = req.query as {Key:string};
-    //     // const result = await deleteFile(({ Key }))
-
-    //     // const result = await deleteFiles({
-    //     //     urls: ["SOCIAL_APP/users/68bb6532b495be110a00d75f/2b4c7d92-532b-4f67-93ec-311398ea6d69_YourName-CoverImage.jpg",
-    //     //         "SOCIAL_APP/users/68bb6532b495be110a00d75f/983112cf-eeae-4956-8c03-bc13d86a36f4_pre_profileImage.jpg"
-    //     //     ],
-    //     //     Quiet:true,
-    //     // })
-
-    //     await deleteFolderByPrefix({ path: `users/` })
-    //     return res.json({ message: "Done", data: {} })
-    // })
+    app.use("/chat", chatRouter)
 
     //get assets
     app.get("/upload/pre-signed/*path", async (req: Request, res: Response): Promise<Response> => {
@@ -147,62 +121,6 @@ const bootstrap = async (): Promise<void> => {
         console.log(`Server is running on port :::${port}`);
 
     });
-    const io = new Server(httpServer, {
-        cors: {
-            origin: "*",
-        }
-    });
-    io.use(async (socket: IAuthSocket, next) => {
-        try {
-            const { user, decoded } = await decodeToken({
-                authorization: socket.handshake?.auth.authorization || "",
-                tokenType: TokenEnum.access,
-            });
-
-            const userTabs = connectedSockets.get((user._id as string).toString()) || [];
-            userTabs.push(socket.id);
-            connectedSockets.set((user._id as string).toString(), userTabs);
-            socket.credentials = { user, decoded };
-            next();
-        } catch (error: any) {
-            next(error);
-        }
-    })
-    //listen to => http://localhost:3000/
-    io.on("connection", (socket: IAuthSocket) => {
-
-        // socket.on("sayHi", (data, callback) => {
-        //     console.log({ data });
-        //     callback("Hello BE To FE")
-        // })
-        console.log({ connectedSockets });
-
-        socket.on("disconnect", () => {
-
-            const userId = socket.credentials?.user._id?.toString() as string;
-            let remainingTabs = connectedSockets.get(userId)?.filter((tab: string) => {
-                return tab !== socket.id;
-            }) || [];
-            if (remainingTabs?.length) {
-                connectedSockets.set(userId, remainingTabs);
-            } else {
-                connectedSockets.delete(userId)
-                io.emit("offline_user", userId)
-            }
-            console.log(`Logout from ::: ${socket.id}`);
-            console.log({ after_Disconnect: connectedSockets });
-
-
-        })
-    })
-
-    //listen to => http://localhost:3000/admin
-    // io.of("/admin").on("connection", (socket: Socket) => {
-    //     console.log("Admin:: :",socket.id);
-    //     socket.on("disconnect", ()=>{
-    //         console.log(`Logout from ::: ${socket.id}`);
-
-    //     })
-    // })
+    initializeIo(httpServer)
 };
 export default bootstrap

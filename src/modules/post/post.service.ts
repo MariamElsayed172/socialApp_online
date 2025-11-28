@@ -10,6 +10,7 @@ import { LikePostQueryInputsDto } from "./post.dto";
 import { Types, UpdateQuery } from "mongoose";
 import { log } from "console";
 import { CommentModel } from "../../DB";
+import { connectedSockets, getIo } from "../gateway";
 export const postAvailability = (req: Request) => {
     return [
         { availability: AvailabilityEnum.public },
@@ -154,6 +155,10 @@ class PostService {
         if (!post) {
             throw new NotFoundException("invalid postId or post not exist")
         }
+
+        if (action !== LikeActionEnum.unlike) {
+            getIo().to(connectedSockets.get(post.createBy.toString()) as string[]).emit("likePost", { postId, userId: req.user?._id })
+        }
         return successResponse({ res })
     }
 
@@ -181,12 +186,12 @@ class PostService {
                                 freezedAt: { $exists: false }
                             },
                             populate: [{
-                            path: "reply",
-                            match: {
-                                commentId: { $exists: false },
-                                freezedAt: { $exists: false }
-                            }
-                        }]
+                                path: "reply",
+                                match: {
+                                    commentId: { $exists: false },
+                                    freezedAt: { $exists: false }
+                                }
+                            }]
                         }],
                     }]
             },

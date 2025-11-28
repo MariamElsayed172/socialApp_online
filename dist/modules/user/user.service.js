@@ -11,6 +11,7 @@ class UserService {
     userModel = new DB_1.UserRepository(DB_1.UserModel);
     friendRequestModel = new DB_1.FriendRequestRepository(DB_1.FriendRequest);
     postModel = new DB_1.PostRepository(DB_1.PostModel);
+    chatModel = new DB_1.ChatRepository(DB_1.ChatModel);
     constructor() { }
     profileImage = async (req, res) => {
         const { ContentType, Originalname } = req.body;
@@ -69,7 +70,13 @@ class UserService {
         if (!profile) {
             throw new error_response_1.NotFoundException("fail to find user profile");
         }
-        return (0, success_response_1.successResponse)({ res, data: { user: profile } });
+        const groups = await this.chatModel.find({
+            filter: {
+                participants: { $in: req.user?._id },
+                group: { $exists: true }
+            }
+        });
+        return (0, success_response_1.successResponse)({ res, data: { user: profile, groups } });
     };
     dashboard = async (req, res) => {
         const results = await Promise.allSettled([

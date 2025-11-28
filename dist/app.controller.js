@@ -16,16 +16,14 @@ const connection_db_1 = __importDefault(require("./DB/connection.db"));
 const s3_config_1 = require("./utils/multer/s3.config");
 const node_util_1 = require("node:util");
 const node_stream_1 = require("node:stream");
+const chat_1 = require("./modules/chat");
 const createS3WriteStreamPipe = (0, node_util_1.promisify)(node_stream_1.pipeline);
-const socket_io_1 = require("socket.io");
-const token_security_1 = require("./utils/security/token.security");
 const limiter = (0, express_rate_limit_1.rateLimit)({
     windowMs: 60 * 60000,
     limit: 2000,
     message: { error: "Too many request please try again later" },
     statusCode: 429
 });
-const connectedSockets = new Map();
 const bootstrap = async () => {
     const port = process.env.PORT || 3000;
     const app = (0, express_1.default)();
@@ -37,6 +35,7 @@ const bootstrap = async () => {
     app.use("/auth", modules_1.authRouter);
     app.use("/user", modules_1.userRouter);
     app.use("/post", modules_1.postRouter);
+    app.use("/chat", chat_1.chatRouter);
     app.get("/upload/pre-signed/*path", async (req, res) => {
         const { downloadName, download = "false", expiresIn = 120 } = req.query;
         const { path } = req.params;
@@ -71,44 +70,6 @@ const bootstrap = async () => {
     const httpServer = app.listen(3000, () => {
         console.log(`Server is running on port :::${port}`);
     });
-    const io = new socket_io_1.Server(httpServer, {
-        cors: {
-            origin: "*",
-        }
-    });
-    io.use(async (socket, next) => {
-        try {
-            const { user, decoded } = await (0, token_security_1.decodeToken)({
-                authorization: socket.handshake?.auth.authorization || "",
-                tokenType: token_security_1.TokenEnum.access,
-            });
-            const userTabs = connectedSockets.get(user._id.toString()) || [];
-            userTabs.push(socket.id);
-            connectedSockets.set(user._id.toString(), userTabs);
-            socket.credentials = { user, decoded };
-            next();
-        }
-        catch (error) {
-            next(error);
-        }
-    });
-    io.on("connection", (socket) => {
-        console.log({ connectedSockets });
-        socket.on("disconnect", () => {
-            const userId = socket.credentials?.user._id?.toString();
-            let remainingTabs = connectedSockets.get(userId)?.filter((tab) => {
-                return tab !== socket.id;
-            }) || [];
-            if (remainingTabs?.length) {
-                connectedSockets.set(userId, remainingTabs);
-            }
-            else {
-                connectedSockets.delete(userId);
-                io.emit("offline_user", userId);
-            }
-            console.log(`Logout from ::: ${socket.id}`);
-            console.log({ after_Disconnect: connectedSockets });
-        });
-    });
+    (0, modules_1.initializeIo)(httpServer);
 };
 exports.default = bootstrap;

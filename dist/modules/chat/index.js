@@ -13,12 +13,11 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
 var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.postRouter = exports.userRouter = exports.authRouter = void 0;
-var auth_1 = require("./auth");
-Object.defineProperty(exports, "authRouter", { enumerable: true, get: function () { return auth_1.router; } });
-var user_1 = require("./user");
-Object.defineProperty(exports, "userRouter", { enumerable: true, get: function () { return user_1.router; } });
-var post_1 = require("./post");
-Object.defineProperty(exports, "postRouter", { enumerable: true, get: function () { return post_1.router; } });
-__exportStar(require("./gateway"), exports);
+exports.chatRouter = void 0;
+__exportStar(require("./chat.gateway"), exports);
+var chat_controller_1 = require("./chat.controller");
+Object.defineProperty(exports, "chatRouter", { enumerable: true, get: function () { return __importDefault(chat_controller_1).default; } });
